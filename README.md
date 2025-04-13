@@ -1,7 +1,7 @@
-# Bilibili_History_Record
-# Bilibili推荐历史记录增强
+# Bilibili_Recommendation_Logger 
+# Bilibili推荐记录
 
-一个用于增强B站首页推荐功能的浏览器用户脚本，支持推荐历史记录、导出等功能。
+一个用于B站首页推荐功能的浏览器用户脚本，支持推荐历史记录、导出等功能。
 
 ## 功能特点
 
