@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         Bilibili首页推荐内容记录回溯与导出
-// @namespace    https://github.com/01XiaoTian/Bilibili_History_Record
+// @namespace    https://github.com/01XiaoTian/Bilibili_Recommendation_Logger
 // @description  为B站首页推荐添加历史记录功能，支持前进、后退、清除历史记录，支持用户自定义历史记录限制。
 // @version      1.1
 // @description  为B站首页推荐添加推荐内容记录、回溯、导出功能
