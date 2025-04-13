@@ -79,9 +79,9 @@ function saveCurrentState() {
   }
 }
 ```
-## 导出功能
+### 导出功能
 支持三种格式
-### JSON
+#### JSON
 ```javascript
 {
   history: [...],
@@ -94,7 +94,7 @@ function saveCurrentState() {
 }
 ```
 
-### Markdown
+#### Markdown
 ```javascript
 # B站推荐历史记录
 导出时间: xxx
@@ -102,7 +102,7 @@ function saveCurrentState() {
 - [视频标题](链接) (UP主: xxx | BV号: xxx)
 ```
 
-### HTML
+#### HTML
 - 包含完整样式的静态页面
 - 支持链接跳转
 - 响应式布局
