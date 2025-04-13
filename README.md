@@ -38,6 +38,75 @@
 - Tampermonkey 或其他用户脚本管理器
 - SweetAlert2 (用于界面交互)
 
+## 技术实现
+### 数据管理
+- 使用数组 `history[]`存储所有历史记录,每条记录为JSON字符串
+- `currentIndex`追踪当前浏览位置
+- 通过`GM_getValue/GM_setValue`持久化配置项
+- 配置项包括
+  ```javasccript
+  historyLimit    // 历史记录上限
+  autoTrim        // 是否自动清理过期记录  
+  exportFormat    // 导出格式
+  exportLimit     // 每页导出数量限制
+  ```
+### DOM操作
+- `MutationObserver` 监听页面变化
+- 使用 `querySelector `定位关键元素
+- 动态创建和插入按钮
+- `CSS`样式隔离,避免污染
+  ```javascript
+  .history-btn {
+  margin: 4px 0;
+  background-color: #00a1d6;
+  /* ...其他样式... */
+  }
+  ```
+### 历史记录处理
+ ```javascript
+function saveCurrentState() {
+  const currentContent = getRecommendCards();
+  // 避免重复记录
+  if (isDuplicate(currentContent)) return;
+  
+  // 更新历史记录
+  history.push(JSON.stringify(currentContent));
+  currentIndex++;
+
+  // 自动清理
+  if (shouldTrim()) {
+    trimHistory();
+  }
+}
+```
+## 导出功能
+支持三种格式
+### JSON
+```javascript
+{
+  history: [...],
+  currentIndex: n,
+  exportDate: "ISO时间戳",
+  metadata: {
+    version: "1.1",
+    type: "bilibili-history"
+  }
+}
+```
+
+### Markdown
+```javascript
+# B站推荐历史记录
+导出时间: xxx
+## 记录 1 (共n个视频) 
+- [视频标题](链接) (UP主: xxx | BV号: xxx)
+```
+
+### HTML
+- 包含完整样式的静态页面
+- 支持链接跳转
+- 响应式布局
+
 ## 许可证
 
 MIT License
