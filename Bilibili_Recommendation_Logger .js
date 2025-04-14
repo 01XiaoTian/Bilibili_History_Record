@@ -1,10 +1,10 @@
 // ==UserScript==
-// @name         Bilibili首页推荐内容记录回溯与导出
+// @name         Bilibili推荐历史记录增强
 // @namespace    https://github.com/01XiaoTian/Bilibili_Recommendation_Logger
 // @description  为B站首页推荐添加历史记录功能，支持前进、后退、清除历史记录，支持用户自定义历史记录限制。
 // @version      1.1
-// @description  为B站首页推荐添加推荐内容记录、回溯、导出功能
-// @author       01XiaoTian
+// @description  为B站首页推荐添加历史记录功能
+// @author       Your name
 // @match        https://www.bilibili.com/*
 // @icon         https://www.bilibili.com/favicon.ico
 // @grant        GM_getValue
@@ -58,9 +58,10 @@
     `;
     document.head.appendChild(style);
 
-    // 使用数组管理历史记录
-    let history = [];
+    // 使用Map管理历史记录
+    let history = new Map();
     let currentIndex = -1;
+    let maxIndex = -1;
 
     // 配置项直接存储在变量中
     let historyLimit = GM_getValue('historyLimit', 5);
@@ -68,33 +69,48 @@
     let exportFormat = GM_getValue('exportFormat', 'json');
     let exportLimit = GM_getValue('exportLimit', 0); // 新增：导出数量限制，0表示无限制
 
-    // 添加视频记录处理函数
-    function processVideoCards(cards) {
-        const processed = new Set(); // 用于去重
+    // 修改视频记录处理函数
+    function processVideoCards(cardData) {
+        const processed = new Set();
         const results = [];
-
-        cards.forEach(card => {
-            const tempDiv = document.createElement('div');
-            tempDiv.innerHTML = card;
+        
+        try {
+            // 处理JSON字符串
+            const content = typeof cardData === 'string' ? JSON.parse(cardData) : cardData;
             
-            const titleEl = tempDiv.querySelector('.bili-video-card__info--tit a, .bili-video-card__info--tit, .video-name');
-            const upEl = tempDiv.querySelector('.bili-video-card__info--author, .up-name, .bili-video-card__info--owner span');
-            const linkEl = tempDiv.querySelector('a.bili-video-card__image--link');
+            // 创建临时容器解析HTML
+            const tempDiv = document.createElement('div');
+            content.forEach(htmlString => {
+                tempDiv.innerHTML = htmlString;
+                
+                // 查找所有视频卡片
+                const cards = tempDiv.querySelectorAll('.feed-card, .bili-video-card, .video-card');
+                
+                cards.forEach(card => {
+                    // 提取视频信息
+                    const titleEl = card.querySelector('.bili-video-card__info--tit, .video-name');
+                    const upEl = card.querySelector('.bili-video-card__info--author, .up-name');
+                    const linkEl = card.querySelector('a[href*="/video/"]');
 
-            // 确保所有必要信息都存在
-            if (!titleEl?.textContent || !upEl?.textContent || !linkEl?.href) return;
+                    if (!titleEl?.textContent || !upEl?.textContent || !linkEl?.href) return;
 
-            const title = titleEl.textContent.trim();
-            const up = upEl.textContent.trim();
-            const link = linkEl.href;
-            const bvid = link.match(/BV\w+/)?.[0] || '';
+                    const title = titleEl.textContent.trim();
+                    const up = upEl.textContent.trim();
+                    const link = linkEl.href;
+                    const bvid = link.match(/BV\w+/)?.[0] || '';
 
-            // 使用BV号作为唯一标识进行去重
-            if (bvid && !processed.has(bvid)) {
-                processed.add(bvid);
-                results.push({ title, up, link, bvid });
-            }
-        });
+                    if (bvid && !processed.has(bvid)) {
+                        processed.add(bvid);
+                        results.push({ title, up, link, bvid });
+                    }
+                });
+                
+                // 清空临时容器
+                tempDiv.innerHTML = '';
+            });
+        } catch (error) {
+            console.error('处理视频卡片失败:', error);
+        }
 
         return results;
     }
@@ -115,8 +131,9 @@
     // 新增：导出功能相关函数
     function exportToJSON() {
         const data = {
-            history: history,
+            history: Array.from(history.entries()),
             currentIndex: currentIndex,
+            maxIndex: maxIndex,
             exportDate: new Date().toISOString(),
             metadata: {
                 version: '1.1',
@@ -131,73 +148,117 @@
     }
 
     function exportToMarkdown() {
-        let md = `# B站推荐历史记录\n\n`;
-        md += `导出时间：${new Date().toLocaleString()}\n\n`;
+        try {
+            let md = `# B站推荐历史记录\n\n`;
+            md += `导出时间：${new Date().toLocaleString()}\n`;
+            md += `导出限制：${exportLimit > 0 ? `每页${exportLimit}个视频` : '无限制'}\n\n`;
 
-        history.forEach((item, index) => {
-            const content = JSON.parse(item);
-            const videos = processVideoCards(content);
-            
-            if (videos.length === 0) return; // 跳过空记录
+            let totalVideos = 0;
+            let totalExported = 0;
 
-            md += `## 记录 ${index + 1} (共${videos.length}个视频)\n\n`;
-            
-            // 应用导出数量限制
-            const limit = exportLimit > 0 ? Math.min(exportLimit, videos.length) : videos.length;
-            videos.slice(0, limit).forEach(video => {
-                md += `- [${video.title}](${video.link}) (UP主: ${video.up} | BV号: ${video.bvid})\n`;
+            history.forEach((content, index) => {
+                const videos = processVideoCards(content);
+                if (!videos || videos.length === 0) return;
+
+                totalVideos += videos.length;
+                const pageLimit = exportLimit > 0 ? exportLimit : videos.length;
+                const exportedVideos = videos.slice(0, pageLimit);
+                totalExported += exportedVideos.length;
+
+                md += `## 记录 ${index + 1}\n`;
+                md += `本页共有 ${videos.length} 个视频${pageLimit < videos.length ? `，导出前 ${pageLimit} 个` : ''}\n\n`;
+
+                exportedVideos.forEach((video, vIndex) => {
+                    md += `${vIndex + 1}. [${video.title}](${video.link})\n`;
+                    md += `   UP主：${video.up} | BV号：${video.bvid}\n\n`;
+                });
+
+                md += '\n---\n\n';
             });
-            md += '\n---\n\n';
-        });
 
-        downloadFile(md, `bilibili-history-${new Date().toLocaleDateString()}.md`, 'text/markdown');
+            md += `## 导出统计\n`;
+            md += `总计发现：${totalVideos} 个视频\n`;
+            md += `实际导出：${totalExported} 个视频\n`;
+
+            downloadFile(md, `bilibili-history-${new Date().toLocaleDateString()}.md`, 'text/markdown');
+            
+            console.log(`导出成功：找到${totalVideos}个视频，导出了${totalExported}个视频`);
+        } catch (error) {
+            console.error('导出失败:', error);
+            alert('导出失败，请查看控制台获取详细信息');
+        }
     }
 
     function exportToHTML() {
-        let html = `
+        try {
+            let totalVideos = 0;
+            let totalExported = 0;
+            let recordsHtml = '';
+
+            history.forEach((content, index) => {
+                const videos = processVideoCards(content);
+                if (videos.length === 0) return;
+
+                totalVideos += videos.length;
+                const pageLimit = exportLimit > 0 ? exportLimit : videos.length;
+                totalExported += Math.min(pageLimit, videos.length);
+
+                recordsHtml += `
+                <div class="record">
+                    <h2>记录 ${index + 1}</h2>
+                    <p class="video-count">本页共有 ${videos.length} 个视频${
+                        exportLimit > 0 ? `，导出前 ${pageLimit} 个` : ''
+                    }</p>
+                    <div class="video-list">`;
+
+                videos.slice(0, pageLimit).forEach((video, vIndex) => {
+                    recordsHtml += `
+                        <div class="video-item">
+                            <span class="index">${vIndex + 1}.</span>
+                            <a href="${video.link}" class="title" target="_blank">${video.title}</a>
+                            <span class="up">UP主：${video.up}</span>
+                            <span class="bvid">BV号：${video.bvid}</span>
+                        </div>`;
+                });
+
+                recordsHtml += `</div></div>`;
+            });
+
+            const html = `
 <!DOCTYPE html>
 <html>
 <head>
     <meta charset="utf-8">
     <title>B站推荐历史记录</title>
     <style>
-        body { font-family: Arial, sans-serif; max-width: 800px; margin: 0 auto; padding: 20px; }
-        .record { border: 1px solid #ddd; margin: 10px 0; padding: 10px; border-radius: 5px; }
-        .title { color: #00a1d6; text-decoration: none; }
+        body { font-family: Arial, sans-serif; max-width: 1000px; margin: 0 auto; padding: 20px; }
+        .record { border: 1px solid #ddd; margin: 15px 0; padding: 15px; border-radius: 8px; }
+        .title { color: #00a1d6; text-decoration: none; margin-right: 10px; }
         .title:hover { text-decoration: underline; }
-        .up { color: #999; }
-        .bvid { color: #666; font-size: 0.9em; }
+        .up, .bvid { color: #666; margin-right: 10px; }
+        .video-count { color: #666; font-style: italic; }
+        .video-item { margin: 10px 0; padding: 5px 0; border-bottom: 1px dashed #eee; }
+        .index { color: #999; margin-right: 10px; }
+        .stats { background: #f5f5f5; padding: 15px; border-radius: 8px; margin: 20px 0; }
     </style>
 </head>
 <body>
     <h1>B站推荐历史记录</h1>
-    <p>导出时间：${new Date().toLocaleString()}</p>
-    <p>共计${history.length}条记录</p>
-`;
+    <div class="stats">
+        <p>导出时间：${new Date().toLocaleString()}</p>
+        <p>导出限制：${exportLimit > 0 ? `每页${exportLimit}个视频` : '无限制'}</p>
+        <p>总计发现：${totalVideos} 个视频</p>
+        <p>实际导出：${totalExported} 个视频</p>
+    </div>
+    ${recordsHtml}
+</body>
+</html>`;
 
-        history.forEach((item, index) => {
-            const content = JSON.parse(item);
-            const videos = processVideoCards(content);
-            
-            if (videos.length === 0) return; // 跳过空记录
-
-            html += `<div class="record"><h2>记录 ${index + 1} (共${videos.length}个视频)</h2>`;
-            
-            // 应用导出数量限制
-            const limit = exportLimit > 0 ? Math.min(exportLimit, videos.length) : videos.length;
-            videos.slice(0, limit).forEach(video => {
-                html += `
-                    <div>
-                        <a href="${video.link}" class="title" target="_blank">${video.title}</a>
-                        <span class="up">(UP主: ${video.up})</span>
-                        <span class="bvid">BV号: ${video.bvid}</span>
-                    </div>`;
-            });
-            html += '</div>';
-        });
-
-        html += '</body></html>';
-        downloadFile(html, `bilibili-history-${new Date().toLocaleDateString()}.html`, 'text/html');
+            downloadFile(html, `bilibili-history-${new Date().toLocaleDateString()}.html`, 'text/html');
+        } catch (error) {
+            console.error('导出HTML失败:', error);
+            alert('导出失败，请查看控制台获取详细信息');
+        }
     }
 
     function downloadFile(content, filename, type) {
@@ -215,9 +276,12 @@
     // DOM操作函数
     function getRecommendCards() {
         try {
-            // 适配移动端
-            const feedCards = document.querySelectorAll('.feed-card, .bili-video-card');
-            return Array.from(feedCards).map(card => card.innerHTML);
+            const feedCards = document.querySelectorAll('.feed-card, .bili-video-card, .video-card');
+            const cards = Array.from(feedCards);
+            return cards.filter(card => {
+                const link = card.querySelector('a[href*="/video/"]');
+                return link !== null;
+            }).map(card => card.outerHTML);
         } catch (error) {
             console.error('获取推荐卡片失败:', error);
             return [];
@@ -226,11 +290,15 @@
 
     function setRecommendCards(contents) {
         try {
-            // 适配移动端
-            const cards = document.querySelectorAll('.feed-card, .bili-video-card');
-            contents.forEach((content, index) => {
-                if (cards[index]) {
-                    cards[index].innerHTML = content;
+            const cards = document.querySelectorAll('.feed-card, .bili-video-card, .video-card');
+            cards.forEach((card, index) => {
+                if (contents[index]) {
+                    const tempDiv = document.createElement('div');
+                    tempDiv.innerHTML = contents[index];
+                    const newCard = tempDiv.firstElementChild;
+                    if (newCard) {
+                        card.replaceWith(newCard);
+                    }
                 }
             });
         } catch (error) {
@@ -242,7 +310,7 @@
         const button = document.createElement('button');
         button.innerHTML = text;
         button.id = id;
-        button.className = `history-btn ${className}`; // 使用新的history-btn类
+        button.className = `history-btn ${className}`;
         return button;
     }
 
@@ -254,45 +322,50 @@
     // 历史记录管理函数
     function saveCurrentState() {
         const currentContent = getRecommendCards();
+        if (!currentContent || currentContent.length === 0) return;
 
-        // 避免保存重复状态
-        if (history.length > 0 && JSON.stringify(currentContent) === JSON.stringify(JSON.parse(history[currentIndex]))) {
-            return;
+        if (history.size > 0 && history.has(currentIndex)) {
+            const lastContent = JSON.parse(history.get(currentIndex));
+            if (JSON.stringify(currentContent) === JSON.stringify(lastContent)) {
+                return;
+            }
         }
 
-        if (currentIndex < history.length - 1) {
-            history = history.slice(0, currentIndex + 1);
-        }
-
-        // 使用JSON字符串存储
-        history.push(JSON.stringify(currentContent));
         currentIndex++;
+        maxIndex = currentIndex;
+        history.set(currentIndex, JSON.stringify(currentContent));
 
-        if (autoTrim && historyLimit > 0 && history.length > historyLimit) {
-            history = history.slice(-historyLimit);
-            currentIndex = history.length - 1;
+        if (autoTrim && historyLimit > 0 && history.size > historyLimit) {
+            const entriesToKeep = Array.from(history.entries())
+                .slice(-historyLimit);
+            history = new Map(entriesToKeep);
+            currentIndex = history.size - 1;
+            maxIndex = currentIndex;
         }
 
         updateButtonStates();
+        
+        console.log(`保存状态：找到${currentContent.length}个视频`);
     }
 
     function goBack() {
         if (currentIndex <= 0) return;
         currentIndex--;
-        setRecommendCards(JSON.parse(history[currentIndex]));
+        setRecommendCards(JSON.parse(history.get(currentIndex)));
         updateButtonStates();
     }
 
     function goForward() {
-        if (currentIndex >= history.length - 1) return;
+        if (currentIndex >= maxIndex) return;
         currentIndex++;
-        setRecommendCards(JSON.parse(history[currentIndex]));
+        setRecommendCards(JSON.parse(history.get(currentIndex)));
         updateButtonStates();
     }
 
     function clearHistory() {
-        history = [];
+        history.clear();
         currentIndex = -1;
+        maxIndex = -1;
         updateButtonStates();
     }
 
@@ -305,7 +378,7 @@
         }
 
         if (forwardBtn) {
-            forwardBtn.disabled = currentIndex >= history.length - 1;
+            forwardBtn.disabled = currentIndex >= maxIndex;
         }
     }
 
@@ -372,7 +445,6 @@
             }
         );
 
-        // 添加导出相关菜单
         GM_registerMenuCommand('📤 导出为JSON', exportToJSON);
         GM_registerMenuCommand('📝 导出为Markdown', exportToMarkdown);
         GM_registerMenuCommand('🌐 导出为HTML', exportToHTML);
@@ -392,18 +464,15 @@
             const buttonContainer = document.createElement('div');
             buttonContainer.className = 'history-buttons';
 
-            // 修改按钮文字，使用\n强制换行
             const backButton = createButton('回到\n上页', 'history-back-btn');
             const forwardButton = createButton('进入\n下页', 'history-forward-btn');
             const clearButton = createButton('清除\n历史', 'history-clear-btn');
             const exportButton = createButton('导出\n记录', 'history-export-btn');
 
-            // 为每个按钮添加点击事件
             backButton.addEventListener('click', goBack);
             forwardButton.addEventListener('click', goForward);
             clearButton.addEventListener('click', clearHistory);
 
-            // 为导出按钮添加点击事件和下拉菜单
             exportButton.addEventListener('click', () => {
                 Swal.fire({
                     title: '选择导出格式',
@@ -423,16 +492,13 @@
                 });
             });
 
-            // 将按钮添加到容器中
             buttonContainer.appendChild(backButton);
             buttonContainer.appendChild(forwardButton);
             buttonContainer.appendChild(clearButton);
             buttonContainer.appendChild(exportButton);
 
-            // 将按钮容器插入到换一换按钮后面
             targetNode.parentNode.insertBefore(buttonContainer, targetNode.nextSibling);
 
-            // 绑定换一换按钮事件
             targetNode.addEventListener('click', () => {
                 setTimeout(() => saveCurrentState(), 750);
             });
@@ -451,6 +517,5 @@
         updateMenuCommands();
     }
 
-    // 启动脚本
     initialize();
 })();
